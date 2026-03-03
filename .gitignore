@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build
+.next/
+out/
+dist/
+bin/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Go
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage/
+*.cover
