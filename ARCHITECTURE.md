@@ -1,26 +1,26 @@
 # Architecture
 
-Triajo follows the same 3-tier pattern as travelblog: frontend components call Next.js API routes, which proxy to a Go API that owns all database access.
+Dochore follows the same 3-tier pattern as travelblog: frontend components call Next.js API routes, which proxy to a Go API that owns all database access.
 
 ## System Diagram
 
 ```
                     ┌─────────────────────────────┐
                     │       Ingress (Nginx)        │
-                    │   admin.triajo.test          │
-                    │   api.triajo.test            │
-                    │   triajo.com (public)        │
+                    │   admin.dochore.test          │
+                    │   api.dochore.test            │
+                    │   dochore.com (public)        │
                     └──────┬──────────┬────────────┘
                            │          │
               ┌────────────▼──┐  ┌────▼──────────┐
-              │  triajo-app   │  │  triajo-web   │
+              │  dochore-app   │  │  dochore-web   │
               │  (Next.js)    │  │  (Next.js)    │
               │  Admin UI     │  │  Public site  │
               │  Port 3000    │  │  Port 3010    │
               └──────┬────────┘  └───────────────┘
                      │ /api/*
               ┌──────▼────────┐
-              │  triajo-api   │
+              │  dochore-api   │
               │  (Go + Gin)   │
               │  Port 8080    │
               └──────┬────────┘
@@ -34,7 +34,7 @@ Triajo follows the same 3-tier pattern as travelblog: frontend components call N
 
 ## Services
 
-### triajo-app (Admin UI)
+### dochore-app (Admin UI)
 
 The primary interface. Next.js with App Router.
 
@@ -42,7 +42,7 @@ The primary interface. Next.js with App Router.
 - **Styling**: Tailwind CSS + Shadcn UI
 - **Auth**: better-auth (Google OAuth initially, add more later)
 - **Port**: 3000
-- **Domain**: admin.triajo.test (dev), admin.triajo.com (future)
+- **Domain**: admin.dochore.test (dev), admin.dochore.com (future)
 
 Key pages:
 - `/` — Dashboard: today's tasks grouped by tag
@@ -51,22 +51,22 @@ Key pages:
 - `/people` — Manage handlers (family, VA, housekeeper)
 - `/rules` — Auto-triage rules (e.g., "dog" → [FAMILY])
 
-### triajo-web (Public Site)
+### dochore-web (Public Site)
 
 Static landing page. Does nothing functional in v1.
 
 - **Framework**: Next.js (static export)
 - **Port**: 3010
-- **Domain**: triajo.com
+- **Domain**: dochore.com
 
-### triajo-api (Go API)
+### dochore-api (Go API)
 
 All business logic and database access.
 
 - **Framework**: Go + Gin
 - **Database**: MongoDB via official Go driver
 - **Port**: 8080
-- **Domain**: api.triajo.test (dev)
+- **Domain**: api.dochore.test (dev)
 
 Key endpoints:
 ```
@@ -83,9 +83,9 @@ POST   /v1/handlers        Create handler
 GET    /v1/health          Health check
 ```
 
-### triajo-mcp (MCP Server)
+### dochore-mcp (MCP Server)
 
-Exposes triajo to AI agents via Model Context Protocol. Can be a thin wrapper around the Go API or a standalone Go binary.
+Exposes dochore to AI agents via Model Context Protocol. Can be a thin wrapper around the Go API or a standalone Go binary.
 
 Tools:
 - `task_create` — Create a task with optional tag
@@ -101,7 +101,7 @@ MongoDB 8.0 on hyperion (192.168.4.106). Already running, accessible from 192.16
 ### Collections
 
 ```
-triajo.tasks
+dochore.tasks
 {
   _id: ObjectId,
   title: string,
@@ -118,7 +118,7 @@ triajo.tasks
   completed_at: Date | null
 }
 
-triajo.handlers
+dochore.handlers
 {
   _id: ObjectId,
   name: string,                  // "Ali", "Mom", "VA - Sarah", "Claude"
@@ -133,7 +133,7 @@ triajo.handlers
   created_at: Date
 }
 
-triajo.rules
+dochore.rules
 {
   _id: ObjectId,
   pattern: string,               // regex or keyword match on title/description
@@ -163,23 +163,23 @@ Docker Compose on hyperion. No Kubernetes — this is a household tool.
 
 ```yaml
 services:
-  triajo-app:
-    build: ./src/triajo-app
+  dochore-app:
+    build: ./src/dochore-app
     ports: ["3000:3000"]
     environment:
-      - TRIAJO_API_URL=http://triajo-api:8080
-    depends_on: [triajo-api]
+      - TRIAJO_API_URL=http://dochore-api:8080
+    depends_on: [dochore-api]
 
-  triajo-web:
-    build: ./src/triajo-web
+  dochore-web:
+    build: ./src/dochore-web
     ports: ["3010:3010"]
 
-  triajo-api:
-    build: ./src/triajo-api
+  dochore-api:
+    build: ./src/dochore-api
     ports: ["8080:8080"]
     environment:
       - MONGO_URI=mongodb://host.docker.internal:27017
-      - MONGO_DATABASE=triajo
+      - MONGO_DATABASE=dochore
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -188,22 +188,22 @@ services:
     ports: ["80:80", "443:443"]
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-    depends_on: [triajo-app, triajo-web, triajo-api]
+    depends_on: [dochore-app, dochore-web, dochore-api]
 ```
 
 ### DNS (local dev)
 
 Add to `/etc/hosts` or dnsmasq:
 ```
-127.0.0.1  admin.triajo.test
-127.0.0.1  api.triajo.test
-127.0.0.1  triajo.test
+127.0.0.1  admin.dochore.test
+127.0.0.1  api.dochore.test
+127.0.0.1  dochore.test
 ```
 
 On hyperion (production):
 ```
-192.168.4.106  admin.triajo.test
-192.168.4.106  api.triajo.test
+192.168.4.106  admin.dochore.test
+192.168.4.106  api.dochore.test
 ```
 
 ## Tech Stack Summary
@@ -215,7 +215,7 @@ On hyperion (production):
 | API | Go 1.24, Gin |
 | Database | MongoDB 8.0 |
 | Auth | better-auth (Google OAuth) |
-| MCP | Go binary (triajo-mcp) |
+| MCP | Go binary (dochore-mcp) |
 | Containers | Docker, Docker Compose |
 | Reverse Proxy | Nginx |
 | Host | Hyperion (192.168.4.106) |

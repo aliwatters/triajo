@@ -1,14 +1,14 @@
-# Triajo
+# Dochore
 
-> Task triage and delegation system — route tasks to humans, family, VAs, and AI agents.
+> Do your chores. Route tasks to humans, family, VAs, and AI agents.
 
-**Domain:** triajo.com / triajo.net (registered)
+**Domain:** dochore.com (registered)
 
 ## What It Is
 
-Triajo is a task management system built for a household that operates with multiple types of workers: the person themselves, family members, virtual assistants, housekeepers, AI agents, and ad-hoc services like TaskRabbit.
+Dochore is a task management system built for a household that operates with multiple types of workers: the person themselves, family members, virtual assistants, housekeepers, AI agents, and ad-hoc services like TaskRabbit.
 
-Tasks come in from everywhere — voice, screenshots, agent broadcasts, calendar events, manual entry. Triajo triages them to the right handler based on tags and rules.
+Tasks come in from everywhere — voice, screenshots, agent broadcasts, calendar events, manual entry. Dochore triages them to the right handler based on tags and rules.
 
 ## Tags
 
@@ -25,9 +25,9 @@ Tasks come in from everywhere — voice, screenshots, agent broadcasts, calendar
 
 Next.js + Go API + MongoDB. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
-- **Public site** (triajo.com): Landing page, nothing functional yet
-- **Admin UI** (admin.triajo.test): The real interface, runs on hyperion
-- **API** (api.triajo.test): Go API with Gin, serves admin UI and MCP/agent integrations
+- **Public site** (dochore.com): Landing page, nothing functional yet
+- **Admin UI** (admin.dochore.test): The real interface, runs on hyperion
+- **API** (api.dochore.test): Go API with Gin, serves admin UI and MCP/agent integrations
 - **Database**: MongoDB 8.0 on hyperion (existing cluster)
 
 ## Key Integrations
@@ -41,15 +41,15 @@ Next.js + Go API + MongoDB. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```bash
 # Clone
-git clone git@github.com:aliwatters/triajo.git
-cd triajo
+git clone git@github.com:aliwatters/dochore.git
+cd dochore
 
 # Dev environment
 docker compose up
 
 # Access
-# Admin UI: http://admin.triajo.test:3000
-# API: http://api.triajo.test:8080
+# Admin UI: http://admin.dochore.test:3000
+# API: http://api.dochore.test:8080
 ```
 
 ## Status
