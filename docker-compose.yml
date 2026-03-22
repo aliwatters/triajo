@@ -1,0 +1,29 @@
+# DNS: add to /etc/hosts for local development
+# 127.0.0.1  api.ginla.test admin.ginla.test ginla.test
+
+services:
+  ginla-api:
+    build: ./src/ginla-api
+    ports:
+      - "8080:8080"
+    environment:
+      - MONGO_URI=mongodb://host.docker.internal:27017
+      - MONGO_DATABASE=ginla
+      - PORT=8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - ginla-api
