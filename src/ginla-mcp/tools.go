@@ -195,6 +195,9 @@ func handleTaskCreate(ctx context.Context, repo *repository.TaskRepository, args
 		Description: getString(args, "description"),
 		Status:      model.StatusInbox,
 		Priority:    model.PriorityNormal,
+		Checklist:   []model.ChecklistItem{},
+		Attachments: []model.Attachment{},
+		Meta:        map[string]any{},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 		Activity: []model.ActivityEntry{
