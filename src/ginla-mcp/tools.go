@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -210,6 +211,21 @@ func toolList() []toolDef {
 				Required: []string{"task_id"},
 			},
 		},
+		// --- Email to task ---
+		{
+			Name:        "email_to_task",
+			Description: "Convert an email into a ginla task. Parses subject for priority/tag hints like [URGENT], [HIGH], [AI], [VA], [FAMILY].",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"from":        {Type: "string", Description: "Sender email address (required)"},
+					"subject":     {Type: "string", Description: "Email subject (required)"},
+					"body":        {Type: "string", Description: "Email body text"},
+					"received_at": {Type: "string", Description: "When email was received (RFC3339, default: now)"},
+				},
+				Required: []string{"from", "subject"},
+			},
+		},
 	}
 }
 
@@ -242,6 +258,8 @@ func callTool(ctx context.Context, tasks *repository.TaskRepository, rules *repo
 		return handleAgentSync(ctx, tasks, args)
 	case "agent_broadcast":
 		return handleAgentBroadcast(ctx, tasks, args)
+	case "email_to_task":
+		return handleEmailToTask(ctx, tasks, args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1000,4 +1018,112 @@ func handleAgentBroadcast(ctx context.Context, repo *repository.TaskRepository, 
 		"message":   message,
 		"task_id":   taskID,
 	})
+}
+
+// --- email to task handler ---
+
+// priorityHints maps subject keywords to priorities.
+var priorityHints = map[string]model.Priority{
+	"[URGENT]":   model.PriorityUrgent,
+	"[HIGH]":     model.PriorityHigh,
+	"[NORMAL]":   model.PriorityNormal,
+	"[LOW]":      model.PriorityLow,
+	"URGENT:":    model.PriorityUrgent,
+	"HIGH:":      model.PriorityHigh,
+	"[CRITICAL]": model.PriorityUrgent,
+}
+
+// tagHints maps subject keywords to tags.
+var tagHints = map[string]model.Tag{
+	"[AI]":          model.TagAI,
+	"[VA]":          model.TagVA,
+	"[FAMILY]":      model.TagFamily,
+	"[HOUSEKEEPER]": model.TagHousekeeper,
+	"[DELEGATE]":    model.TagDelegate,
+	"[ME]":          model.TagMe,
+}
+
+func handleEmailToTask(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	from := getString(args, "from")
+	if from == "" {
+		return "", fmt.Errorf("from is required")
+	}
+	subject := getString(args, "subject")
+	if subject == "" {
+		return "", fmt.Errorf("subject is required")
+	}
+	body := getString(args, "body")
+	receivedAt := getString(args, "received_at")
+
+	// Parse priority from subject
+	priority := model.PriorityNormal
+	for keyword, p := range priorityHints {
+		if strings.Contains(strings.ToUpper(subject), strings.ToUpper(keyword)) {
+			priority = p
+			break
+		}
+	}
+
+	// Parse tag from subject
+	var tag *model.Tag
+	subjectUpper := strings.ToUpper(subject)
+	for keyword, t := range tagHints {
+		if strings.Contains(subjectUpper, strings.ToUpper(keyword)) {
+			t := t
+			tag = &t
+			break
+		}
+	}
+
+	// Clean up subject for use as title (remove hint markers)
+	title := subject
+	for keyword := range priorityHints {
+		title = strings.ReplaceAll(title, keyword, "")
+	}
+	for keyword := range tagHints {
+		title = strings.ReplaceAll(title, keyword, "")
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = subject // fallback to original if all hints
+	}
+
+	now := time.Now().UTC()
+	srcEmail := model.SourceEmail
+
+	receivedTime := now
+	if receivedAt != "" {
+		if t, err := time.Parse(time.RFC3339, receivedAt); err == nil {
+			receivedTime = t
+		}
+	}
+
+	meta := map[string]any{
+		"email_from":        from,
+		"email_subject":     subject,
+		"email_received_at": receivedTime.Format(time.RFC3339),
+	}
+
+	task := &model.Task{
+		Title:       title,
+		Description: body,
+		Status:      model.StatusInbox,
+		Priority:    priority,
+		Source:      &srcEmail,
+		Tag:         tag,
+		Meta:        meta,
+		Checklist:   []model.ChecklistItem{},
+		Attachments: []model.Attachment{},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Activity: []model.ActivityEntry{
+			{Action: "created", By: "email-to-task", At: now, Detail: fmt.Sprintf("from: %s", from)},
+		},
+	}
+
+	if err := repo.Create(ctx, task); err != nil {
+		return "", fmt.Errorf("create task from email: %w", err)
+	}
+
+	return toJSON(task)
 }

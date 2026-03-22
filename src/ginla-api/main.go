@@ -54,6 +54,9 @@ func main() {
 		v1.PATCH("/tasks/:id", taskHandler.Update)
 		v1.DELETE("/tasks/:id", taskHandler.Delete)
 
+		emailHandler := handler.NewEmailHandler(taskRepo)
+		v1.POST("/tasks/from-email", emailHandler.FromEmail)
+
 		ruleHandler := handler.NewRuleHandler(ruleRepo)
 		v1.POST("/rules", ruleHandler.Create)
 		v1.GET("/rules", ruleHandler.List)
