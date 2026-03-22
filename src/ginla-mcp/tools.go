@@ -15,8 +15,8 @@ import (
 
 // toolDef describes one MCP tool for the tools/list response.
 type toolDef struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
 	InputSchema inputSchema `json:"inputSchema"`
 }
 
@@ -49,6 +49,7 @@ func toolList() []toolDef {
 					"source":      {Type: "string", Description: "Task source", Enum: []string{"manual", "agent", "email", "calendar", "voice", "screenshot"}},
 					"checklist":   {Type: "string", Description: "JSON array of checklist items: [{\"text\":\"...\",\"done\":false}]"},
 					"parent_id":   {Type: "string", Description: "Parent task ObjectID (hex string)"},
+					"meta":        {Type: "string", Description: "JSON object of additional metadata"},
 				},
 				Required: []string{"title"},
 			},
@@ -88,15 +89,15 @@ func toolList() []toolDef {
 			InputSchema: inputSchema{
 				Type: "object",
 				Properties: map[string]property{
-					"id":         {Type: "string", Description: "Task ObjectID (hex string, required)"},
-					"status":     {Type: "string", Description: "New status", Enum: []string{"inbox", "pending", "active", "done", "cancelled"}},
-					"tag":        {Type: "string", Description: "New tag", Enum: []string{"ME", "AI", "VA", "FAMILY", "HOUSEKEEPER", "DELEGATE"}},
-					"priority":   {Type: "string", Description: "New priority", Enum: []string{"urgent", "high", "normal", "low"}},
-					"handler_id": {Type: "string", Description: "Handler ObjectID (hex string)"},
+					"id":          {Type: "string", Description: "Task ObjectID (hex string, required)"},
+					"status":      {Type: "string", Description: "New status", Enum: []string{"inbox", "pending", "active", "done", "cancelled"}},
+					"tag":         {Type: "string", Description: "New tag", Enum: []string{"ME", "AI", "VA", "FAMILY", "HOUSEKEEPER", "DELEGATE"}},
+					"priority":    {Type: "string", Description: "New priority", Enum: []string{"urgent", "high", "normal", "low"}},
+					"handler_id":  {Type: "string", Description: "Handler ObjectID (hex string)"},
 					"description": {Type: "string", Description: "Updated description"},
-					"due":        {Type: "string", Description: "Updated due date (RFC3339)"},
-					"checklist":  {Type: "string", Description: "Replacement checklist JSON array"},
-					"position":   {Type: "number", Description: "Manual sort position"},
+					"due":         {Type: "string", Description: "Updated due date (RFC3339)"},
+					"checklist":   {Type: "string", Description: "Replacement checklist JSON array"},
+					"position":    {Type: "number", Description: "Manual sort position"},
 				},
 				Required: []string{"id"},
 			},
@@ -117,6 +118,72 @@ func toolList() []toolDef {
 				Properties: map[string]property{},
 			},
 		},
+		// --- Rule CRUD tools ---
+		{
+			Name:        "rule_create",
+			Description: "Create a new triage rule. Rules match inbox tasks by regex pattern and assign a tag, priority, and optional handler.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"name":       {Type: "string", Description: "Human-readable rule name (required)"},
+					"pattern":    {Type: "string", Description: "Regex pattern to match against task title+description (required)"},
+					"tag":        {Type: "string", Description: "Tag to assign on match (required)", Enum: []string{"ME", "AI", "VA", "FAMILY", "HOUSEKEEPER", "DELEGATE"}},
+					"priority":   {Type: "string", Description: "Priority to assign on match", Enum: []string{"urgent", "high", "normal", "low"}},
+					"handler_id": {Type: "string", Description: "Handler ObjectID to assign on match (hex string)"},
+					"order":      {Type: "number", Description: "Sort order for rule evaluation (lower = higher priority, default 100)"},
+					"active":     {Type: "string", Description: "Whether the rule is active (true/false, default true)"},
+				},
+				Required: []string{"name", "pattern", "tag"},
+			},
+		},
+		{
+			Name:        "rule_list",
+			Description: "List all triage rules for the household.",
+			InputSchema: inputSchema{
+				Type:       "object",
+				Properties: map[string]property{},
+			},
+		},
+		{
+			Name:        "rule_get",
+			Description: "Get a single triage rule by ID.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"id": {Type: "string", Description: "Rule ObjectID (hex string)"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "rule_update",
+			Description: "Update a triage rule.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"id":         {Type: "string", Description: "Rule ObjectID (hex string, required)"},
+					"name":       {Type: "string", Description: "Updated name"},
+					"pattern":    {Type: "string", Description: "Updated regex pattern"},
+					"tag":        {Type: "string", Description: "Updated tag", Enum: []string{"ME", "AI", "VA", "FAMILY", "HOUSEKEEPER", "DELEGATE"}},
+					"priority":   {Type: "string", Description: "Updated priority", Enum: []string{"urgent", "high", "normal", "low"}},
+					"handler_id": {Type: "string", Description: "Updated handler ObjectID (hex string)"},
+					"order":      {Type: "number", Description: "Updated sort order"},
+					"active":     {Type: "string", Description: "Enable/disable rule (true/false)"},
+				},
+				Required: []string{"id"},
+			},
+		},
+		{
+			Name:        "rule_delete",
+			Description: "Delete a triage rule by ID.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"id": {Type: "string", Description: "Rule ObjectID (hex string)"},
+				},
+				Required: []string{"id"},
+			},
+		},
 	}
 }
 
@@ -135,6 +202,16 @@ func callTool(ctx context.Context, tasks *repository.TaskRepository, rules *repo
 		return handleTaskTriage(ctx, tasks, rules)
 	case "inbox_count":
 		return handleInboxCount(ctx, tasks)
+	case "rule_create":
+		return handleRuleCreate(ctx, rules, args)
+	case "rule_list":
+		return handleRuleList(ctx, rules)
+	case "rule_get":
+		return handleRuleGet(ctx, rules, args)
+	case "rule_update":
+		return handleRuleUpdate(ctx, rules, args)
+	case "rule_delete":
+		return handleRuleDelete(ctx, rules, args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -181,7 +258,7 @@ func parseObjectID(s string) (bson.ObjectID, error) {
 	return bson.ObjectIDFromHex(s)
 }
 
-// --- tool handlers ---
+// --- task tool handlers ---
 
 func handleTaskCreate(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
 	title := getString(args, "title")
@@ -248,6 +325,14 @@ func handleTaskCreate(ctx context.Context, repo *repository.TaskRepository, args
 			return "", fmt.Errorf("invalid checklist JSON: %w", err)
 		}
 		task.Checklist = items
+	}
+
+	if metaStr := getString(args, "meta"); metaStr != "" {
+		var meta map[string]any
+		if err := json.Unmarshal([]byte(metaStr), &meta); err != nil {
+			return "", fmt.Errorf("invalid meta JSON: %w", err)
+		}
+		task.Meta = meta
 	}
 
 	if err := repo.Create(ctx, task); err != nil {
@@ -441,10 +526,10 @@ func handleTaskTriage(ctx context.Context, tasks *repository.TaskRepository, rul
 	}
 
 	type triageResult struct {
-		ID      string `json:"id"`
-		Title   string `json:"title"`
-		Tag     string `json:"tag"`
-		Rule    string `json:"rule"`
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		Tag   string `json:"tag"`
+		Rule  string `json:"rule"`
 	}
 
 	var triaged []triageResult
@@ -511,5 +596,177 @@ func handleInboxCount(ctx context.Context, repo *repository.TaskRepository) (str
 	}
 
 	result := map[string]int64{"count": count}
+	return toJSON(result)
+}
+
+// --- rule tool handlers ---
+
+func handleRuleCreate(ctx context.Context, repo *repository.RuleRepository, args map[string]any) (string, error) {
+	name := getString(args, "name")
+	if name == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	pattern := getString(args, "pattern")
+	if pattern == "" {
+		return "", fmt.Errorf("pattern is required")
+	}
+	tagStr := getString(args, "tag")
+	if tagStr == "" {
+		return "", fmt.Errorf("tag is required")
+	}
+	tag := model.Tag(tagStr)
+	if !model.ValidTags[tag] {
+		return "", fmt.Errorf("invalid tag: %s", tagStr)
+	}
+
+	// Validate regex
+	if _, err := regexp.Compile(pattern); err != nil {
+		return "", fmt.Errorf("invalid regex pattern: %w", err)
+	}
+
+	order := 100
+	if o, ok := getFloat(args, "order"); ok {
+		order = int(o)
+	}
+
+	active := true
+	if a := getString(args, "active"); a == "false" {
+		active = false
+	}
+
+	rule := &model.Rule{
+		Name:    name,
+		Pattern: pattern,
+		Tag:     tag,
+		Order:   order,
+		Active:  active,
+	}
+
+	if pri := getString(args, "priority"); pri != "" {
+		p := model.Priority(pri)
+		if !model.ValidPriorities[p] {
+			return "", fmt.Errorf("invalid priority: %s", pri)
+		}
+		rule.Priority = &p
+	}
+
+	if hid := getString(args, "handler_id"); hid != "" {
+		oid, err := parseObjectID(hid)
+		if err != nil {
+			return "", fmt.Errorf("invalid handler_id: %w", err)
+		}
+		rule.HandlerID = &oid
+	}
+
+	if err := repo.Create(ctx, rule); err != nil {
+		return "", fmt.Errorf("create rule: %w", err)
+	}
+
+	return toJSON(rule)
+}
+
+func handleRuleList(ctx context.Context, repo *repository.RuleRepository) (string, error) {
+	rules, err := repo.List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list rules: %w", err)
+	}
+	return toJSON(rules)
+}
+
+func handleRuleGet(ctx context.Context, repo *repository.RuleRepository, args map[string]any) (string, error) {
+	id := getString(args, "id")
+	oid, err := parseObjectID(id)
+	if err != nil {
+		return "", fmt.Errorf("invalid id: %w", err)
+	}
+
+	rule, err := repo.GetByID(ctx, oid)
+	if err != nil {
+		return "", fmt.Errorf("get rule: %w", err)
+	}
+	if rule == nil {
+		return "", fmt.Errorf("rule not found: %s", id)
+	}
+
+	return toJSON(rule)
+}
+
+func handleRuleUpdate(ctx context.Context, repo *repository.RuleRepository, args map[string]any) (string, error) {
+	id := getString(args, "id")
+	oid, err := parseObjectID(id)
+	if err != nil {
+		return "", fmt.Errorf("invalid id: %w", err)
+	}
+
+	set := bson.D{}
+
+	if name := getString(args, "name"); name != "" {
+		set = append(set, bson.E{Key: "name", Value: name})
+	}
+	if pattern := getString(args, "pattern"); pattern != "" {
+		if _, err := regexp.Compile(pattern); err != nil {
+			return "", fmt.Errorf("invalid regex pattern: %w", err)
+		}
+		set = append(set, bson.E{Key: "pattern", Value: pattern})
+	}
+	if tagStr := getString(args, "tag"); tagStr != "" {
+		tag := model.Tag(tagStr)
+		if !model.ValidTags[tag] {
+			return "", fmt.Errorf("invalid tag: %s", tagStr)
+		}
+		set = append(set, bson.E{Key: "tag", Value: tag})
+	}
+	if pri := getString(args, "priority"); pri != "" {
+		p := model.Priority(pri)
+		if !model.ValidPriorities[p] {
+			return "", fmt.Errorf("invalid priority: %s", pri)
+		}
+		set = append(set, bson.E{Key: "priority", Value: p})
+	}
+	if hid := getString(args, "handler_id"); hid != "" {
+		hoid, err := parseObjectID(hid)
+		if err != nil {
+			return "", fmt.Errorf("invalid handler_id: %w", err)
+		}
+		set = append(set, bson.E{Key: "handler_id", Value: hoid})
+	}
+	if o, ok := getFloat(args, "order"); ok {
+		set = append(set, bson.E{Key: "order", Value: int(o)})
+	}
+	if a := getString(args, "active"); a != "" {
+		set = append(set, bson.E{Key: "active", Value: a == "true"})
+	}
+
+	if len(set) == 0 {
+		return "", fmt.Errorf("no fields to update")
+	}
+
+	updated, err := repo.UpdateFields(ctx, oid, set)
+	if err != nil {
+		return "", fmt.Errorf("update rule: %w", err)
+	}
+	if updated == nil {
+		return "", fmt.Errorf("rule not found: %s", id)
+	}
+
+	return toJSON(updated)
+}
+
+func handleRuleDelete(ctx context.Context, repo *repository.RuleRepository, args map[string]any) (string, error) {
+	id := getString(args, "id")
+	oid, err := parseObjectID(id)
+	if err != nil {
+		return "", fmt.Errorf("invalid id: %w", err)
+	}
+
+	deleted, err := repo.Delete(ctx, oid)
+	if err != nil {
+		return "", fmt.Errorf("delete rule: %w", err)
+	}
+	if !deleted {
+		return "", fmt.Errorf("rule not found: %s", id)
+	}
+
+	result := map[string]any{"deleted": true, "id": id}
 	return toJSON(result)
 }
