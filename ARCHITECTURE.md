@@ -98,62 +98,7 @@ Tools:
 
 MongoDB 8.0 on hyperion (192.168.4.106). Already running, accessible from 192.168.4.0/24.
 
-### Collections
-
-```
-ginla.tasks
-{
-  _id: ObjectId,
-  title: string,
-  description: string,           // markdown
-  tag: string,                   // "ME", "AI", "VA", "FAMILY", "HOUSEKEEPER", "DELEGATE"
-  status: string,                // "inbox", "pending", "in_progress", "completed", "cancelled"
-  handler: string | null,        // who's doing it (name or agent ID)
-  priority: string,              // "urgent", "high", "normal", "low"
-  due: Date | null,
-  source: string,                // "manual", "agent", "email", "calendar", "voice"
-  metadata: object,              // flexible — source-specific data
-  created_at: Date,
-  updated_at: Date,
-  completed_at: Date | null
-}
-
-ginla.handlers
-{
-  _id: ObjectId,
-  name: string,                  // "Ali", "Mom", "VA - Sarah", "Claude"
-  type: string,                  // "me", "family", "va", "housekeeper", "ai", "service"
-  tags: [string],                // which tags this handler covers
-  contact: {                     // how to reach them
-    email: string,
-    phone: string,
-    agent_id: string             // for AI handlers
-  },
-  active: boolean,
-  created_at: Date
-}
-
-ginla.rules
-{
-  _id: ObjectId,
-  pattern: string,               // regex or keyword match on title/description
-  tag: string,                   // auto-assign this tag
-  handler: string | null,        // auto-assign this handler
-  priority: string | null,       // auto-set priority
-  active: boolean,
-  created_at: Date
-}
-```
-
-### Indexes
-
-```
-tasks: { status: 1, tag: 1 }
-tasks: { handler: 1, status: 1 }
-tasks: { due: 1 } (sparse)
-tasks: { created_at: -1 }
-rules: { active: 1 }
-```
+Four collections: `households`, `tasks`, `handlers`, `rules`. See [SCHEMA.md](SCHEMA.md) for full schema, indexes, lifecycle, and recurrence model.
 
 ## Deployment
 
