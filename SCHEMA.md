@@ -1,6 +1,6 @@
 # Schema
 
-MongoDB 8.0. Database: `ginla`. Four collections.
+MongoDB 8.0. Database: `ginla`. Four ginla collections + better-auth managed collections.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -13,6 +13,9 @@ MongoDB 8.0. Database: `ginla`. Four collections.
 │  │  ∟ user_id   │    │  tags[]      │    │  → tag       │      │
 │  │  ∟ role      │    │  contact{}   │    │  → handler   │      │
 │  │  ∟ handler_id│───▶│              │    │  → priority  │      │
+│  │  invites[]   │    │              │    │              │      │
+│  │  ∟ email     │    │              │    │              │      │
+│  │  ∟ token     │    │              │    │              │      │
 │  └──────┬───────┘    └──────▲───────┘    └──────────────┘      │
 │         │                   │                                   │
 │         │ household_id      │ handler_id                        │
@@ -27,6 +30,7 @@ MongoDB 8.0. Database: `ginla`. Four collections.
 │  │  source ──── manual | agent | email | calendar | ... │       │
 │  │                                                      │       │
 │  │  parent_id ──▶ tasks (self-ref for subtasks)         │       │
+│  │  position ──── Number (manual sort order)             │       │
 │  │  checklist[] ── [{text, done}] (inline checkboxes)   │       │
 │  │  recurrence ── {rrule, next_at} (repeating tasks)    │       │
 │  │  attachments[] ── [{url, name, type}]                │       │
@@ -54,6 +58,16 @@ The tenant. Everything is scoped to a household.
       handler_id: ObjectId           // links to their handler record
     }
   ],
+  invites: [
+    {
+      email: "jenny@example.com",
+      role: "member",              // role they'll get on acceptance
+      token: "inv_abc123def456",   // unique, used in invite link
+      invited_by: "google-oauth|123",
+      created_at: Date,
+      expires_at: Date             // 7 days default
+    }
+  ],
   created_at: Date
 }
 ```
@@ -62,6 +76,7 @@ The tenant. Everything is scoped to a household.
 - `user_id` comes from better-auth, opaque string
 - `role` controls what they can do in the UI
 - `handler_id` links a logged-in user to their handler identity for task assignment
+- `invites` is embedded — transient (accepted or expired), small cardinality. On acceptance: remove from `invites[]`, add to `members[]`, create handler record
 
 ### tasks
 
@@ -88,6 +103,7 @@ The core object. Everything flows through here.
   // when
   status: "active",                  // inbox → pending → active → done | cancelled
   priority: "normal",                // urgent | high | normal | low
+  position: 0,                      // manual sort order (drag-and-drop), lower = higher in list
   due: Date | null,
 
   // where it came from
@@ -131,6 +147,7 @@ The core object. Everything flows through here.
 - `recurrence` uses standard iCal RRULE format — well-understood, parseable by every language
 - `meta` is the escape hatch — anything source-specific goes here without polluting the schema
 - `status` is simplified from 5 to 5 but renamed: `in_progress` → `active`, `completed` → `done` (shorter, matches how people talk)
+- `position` enables manual drag-and-drop ordering in the UI. Nullable — when null, sort falls back to priority + created_at
 
 ### handlers
 
@@ -180,6 +197,7 @@ Pattern-matching for auto-triage. When a task hits the inbox, rules run in order
 { household_id: 1, handler_id: 1, status: 1 }  // "what's assigned to Claude?"
 { household_id: 1, due: 1 }                    // "what's due soon?" (sparse)
 { household_id: 1, created_at: -1 }            // "recent tasks"
+{ household_id: 1, status: 1, position: 1 }   // "manual sort within a view"
 { household_id: 1, parent_id: 1 }              // "subtasks of X"
 { "recurrence.next_at": 1 }                    // cron: "which recurring tasks need spawning?"
 
@@ -226,3 +244,16 @@ This keeps recurring tasks as regular tasks in every query — no special cases 
 Every document has `household_id`. Every query includes it. No cross-household data leakage by construction. The compound indexes all lead with `household_id` so queries are scoped efficiently.
 
 Users can only belong to one household for v1. The `households.members` array is the source of truth for access control.
+
+## better-auth Collections (externally managed)
+
+better-auth creates and manages its own collections in the same database. We don't define or migrate these — better-auth owns them. We only read `user_id` from them.
+
+```
+ginla.users          — managed by better-auth (user profiles, email, name)
+ginla.sessions       — managed by better-auth (active sessions)
+ginla.accounts       — managed by better-auth (OAuth provider links)
+ginla.verifications  — managed by better-auth (email verification tokens)
+```
+
+The `households.members[].user_id` references `users._id` from better-auth. This is the only cross-reference between ginla collections and better-auth collections.
