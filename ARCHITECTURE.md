@@ -1,26 +1,26 @@
 # Architecture
 
-Dochore follows the same 3-tier pattern as travelblog: frontend components call Next.js API routes, which proxy to a Go API that owns all database access.
+Ginla follows the same 3-tier pattern as travelblog: frontend components call Next.js API routes, which proxy to a Go API that owns all database access.
 
 ## System Diagram
 
 ```
                     ┌─────────────────────────────┐
                     │       Ingress (Nginx)        │
-                    │   admin.dochore.test          │
-                    │   api.dochore.test            │
-                    │   dochore.com (public)        │
+                    │   admin.ginla.test            │
+                    │   api.ginla.test              │
+                    │   ginla.com (public)          │
                     └──────┬──────────┬────────────┘
                            │          │
               ┌────────────▼──┐  ┌────▼──────────┐
-              │  dochore-app   │  │  dochore-web   │
+              │  ginla-app     │  │  ginla-web     │
               │  (Next.js)    │  │  (Next.js)    │
               │  Admin UI     │  │  Public site  │
               │  Port 3000    │  │  Port 3010    │
               └──────┬────────┘  └───────────────┘
                      │ /api/*
               ┌──────▼────────┐
-              │  dochore-api   │
+              │  ginla-api     │
               │  (Go + Gin)   │
               │  Port 8080    │
               └──────┬────────┘
@@ -34,7 +34,7 @@ Dochore follows the same 3-tier pattern as travelblog: frontend components call 
 
 ## Services
 
-### dochore-app (Admin UI)
+### ginla-app (Admin UI)
 
 The primary interface. Next.js with App Router.
 
@@ -42,7 +42,7 @@ The primary interface. Next.js with App Router.
 - **Styling**: Tailwind CSS + Shadcn UI
 - **Auth**: better-auth (Google OAuth initially, add more later)
 - **Port**: 3000
-- **Domain**: admin.dochore.test (dev), admin.dochore.com (future)
+- **Domain**: admin.ginla.test (dev), admin.ginla.com (future)
 
 Key pages:
 - `/` — Dashboard: today's tasks grouped by tag
@@ -51,22 +51,22 @@ Key pages:
 - `/people` — Manage handlers (family, VA, housekeeper)
 - `/rules` — Auto-triage rules (e.g., "dog" → [FAMILY])
 
-### dochore-web (Public Site)
+### ginla-web (Public Site)
 
 Static landing page. Does nothing functional in v1.
 
 - **Framework**: Next.js (static export)
 - **Port**: 3010
-- **Domain**: dochore.com
+- **Domain**: ginla.com
 
-### dochore-api (Go API)
+### ginla-api (Go API)
 
 All business logic and database access.
 
 - **Framework**: Go + Gin
 - **Database**: MongoDB via official Go driver
 - **Port**: 8080
-- **Domain**: api.dochore.test (dev)
+- **Domain**: api.ginla.test (dev)
 
 Key endpoints:
 ```
@@ -83,9 +83,9 @@ POST   /v1/handlers        Create handler
 GET    /v1/health          Health check
 ```
 
-### dochore-mcp (MCP Server)
+### ginla-mcp (MCP Server)
 
-Exposes dochore to AI agents via Model Context Protocol. Can be a thin wrapper around the Go API or a standalone Go binary.
+Exposes Ginla to AI agents via Model Context Protocol. Can be a thin wrapper around the Go API or a standalone Go binary.
 
 Tools:
 - `task_create` — Create a task with optional tag
@@ -101,7 +101,7 @@ MongoDB 8.0 on hyperion (192.168.4.106). Already running, accessible from 192.16
 ### Collections
 
 ```
-dochore.tasks
+ginla.tasks
 {
   _id: ObjectId,
   title: string,
@@ -118,7 +118,7 @@ dochore.tasks
   completed_at: Date | null
 }
 
-dochore.handlers
+ginla.handlers
 {
   _id: ObjectId,
   name: string,                  // "Ali", "Mom", "VA - Sarah", "Claude"
@@ -133,7 +133,7 @@ dochore.handlers
   created_at: Date
 }
 
-dochore.rules
+ginla.rules
 {
   _id: ObjectId,
   pattern: string,               // regex or keyword match on title/description
@@ -163,23 +163,23 @@ Docker Compose on hyperion. No Kubernetes — this is a household tool.
 
 ```yaml
 services:
-  dochore-app:
-    build: ./src/dochore-app
+  ginla-app:
+    build: ./src/ginla-app
     ports: ["3000:3000"]
     environment:
-      - TRIAJO_API_URL=http://dochore-api:8080
-    depends_on: [dochore-api]
+      - GINLA_API_URL=http://ginla-api:8080
+    depends_on: [ginla-api]
 
-  dochore-web:
-    build: ./src/dochore-web
+  ginla-web:
+    build: ./src/ginla-web
     ports: ["3010:3010"]
 
-  dochore-api:
-    build: ./src/dochore-api
+  ginla-api:
+    build: ./src/ginla-api
     ports: ["8080:8080"]
     environment:
       - MONGO_URI=mongodb://host.docker.internal:27017
-      - MONGO_DATABASE=dochore
+      - MONGO_DATABASE=ginla
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -188,22 +188,22 @@ services:
     ports: ["80:80", "443:443"]
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-    depends_on: [dochore-app, dochore-web, dochore-api]
+    depends_on: [ginla-app, ginla-web, ginla-api]
 ```
 
 ### DNS (local dev)
 
 Add to `/etc/hosts` or dnsmasq:
 ```
-127.0.0.1  admin.dochore.test
-127.0.0.1  api.dochore.test
-127.0.0.1  dochore.test
+127.0.0.1  admin.ginla.test
+127.0.0.1  api.ginla.test
+127.0.0.1  ginla.test
 ```
 
 On hyperion (production):
 ```
-192.168.4.106  admin.dochore.test
-192.168.4.106  api.dochore.test
+192.168.4.106  admin.ginla.test
+192.168.4.106  api.ginla.test
 ```
 
 ## Tech Stack Summary
@@ -215,7 +215,7 @@ On hyperion (production):
 | API | Go 1.24, Gin |
 | Database | MongoDB 8.0 |
 | Auth | better-auth (Google OAuth) |
-| MCP | Go binary (dochore-mcp) |
+| MCP | Go binary (ginla-mcp) |
 | Containers | Docker, Docker Compose |
 | Reverse Proxy | Nginx |
 | Host | Hyperion (192.168.4.106) |

@@ -15,13 +15,13 @@ No tool today triages tasks to the right handler. You end up being the bottlenec
 
 ## The Solution
 
-Dochore is a task triage system. Tasks come in, get tagged by handler type, and route to whoever can do them. The person at the center sets the rules and makes decisions. Everything else is delegated.
+Ginla is a task triage system. Tasks come in, get tagged by handler type, and route to whoever can do them. The person at the center sets the rules and makes decisions. Everything else is delegated.
 
 ### What Makes It Different
 
 1. **Handler-aware**: Tasks have a `tag` that maps to a handler type, not just a person. "[AI] research MacBook Air M5 pricing" goes to an agent. "[FAMILY] get Toni to the groomer" goes to a family member. "[VA] call PCC about registration" goes to the VA.
 
-2. **Agent-native**: AI agents are first-class handlers. They can create tasks, claim tasks, update status, and broadcast completions. The MCP server makes dochore accessible from any Claude session.
+2. **Agent-native**: AI agents are first-class handlers. They can create tasks, claim tasks, update status, and broadcast completions. The MCP server makes Ginla accessible from any Claude session.
 
 3. **Inbox triage**: Untagged tasks land in an inbox. Auto-triage rules match patterns to tags. What can't be auto-triaged gets surfaced for manual triage.
 
@@ -46,7 +46,7 @@ Dochore is a task triage system. Tasks come in, get tagged by handler type, and 
 - Shopping list integration
 
 ### Phase 3: Product
-- Public signup on dochore.com
+- Public signup on ginla.com
 - Multi-household support
 - Onboarding flow for handler types
 - Mobile apps (iOS/Android)

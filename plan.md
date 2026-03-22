@@ -13,7 +13,7 @@ The goal is to replace the flat markdown file with something that understands de
 5. **#5** — Task CRUD API
 6. **#6** — Admin UI: task list with filters
 7. **#7** — Admin UI: task creation + inbox triage
-8. **#8** — dochore-mcp server (agents can create/list/update tasks)
+8. **#8** — ginla-mcp server (agents can create/list/update tasks)
 9. **#22** — Invite system + multi-household support
 
 MVP is done when: you can create a task in the UI, tag it [AI], and a Claude agent can pick it up via MCP. And your family/VA can log in and see only their tasks.
@@ -46,7 +46,7 @@ Get the core loop working: create task → triage → assign → complete. With 
 - [ ] #7 — Admin UI: task creation form + inbox triage view
 
 ### Milestone 1C: Agent Integration
-- [ ] #8 — dochore-mcp server (task_create, task_list, task_update, inbox_count)
+- [ ] #8 — ginla-mcp server (task_create, task_list, task_update, inbox_count)
 - [ ] #9 — Auto-triage rules engine (keyword/regex → tag mapping)
 - [ ] #10 — agents-mcp integration (listen for broadcasts, create tasks from events)
 
@@ -76,7 +76,7 @@ Connect to the rest of the ecosystem.
 
 ## Phase 4: Public Product (Future)
 
-- [ ] Public site on dochore.com (waitlist, marketing)
+- [ ] Public site on ginla.com (waitlist, marketing)
 - [ ] Onboarding flow for new households
 - [ ] Mobile apps (iOS/Android)
 - [ ] Pricing model (freemium: free for 1 household, paid for multi + premium features)
@@ -86,21 +86,21 @@ Connect to the rest of the ecosystem.
 
 ## Architecture Insights from LoanForge A-K Workflow
 
-Jenny's Encompass consulting pipeline (A-K) validated several patterns dochore should adopt:
+Jenny's Encompass consulting pipeline (A-K) validated several patterns Ginla should adopt:
 
 1. **Multi-step workflows work when each step has a clear handler.** Jenny's steps E-K are repetitive copy-paste across JotForm and Teamwork — the same pattern as household tasks that get delegated to a VA or housekeeper.
 
-2. **State transitions need visibility.** The pipeline view (intake → processing → UAT → deployed → warranty → closed) maps directly to dochore's task lifecycle (inbox → pending → in_progress → completed).
+2. **State transitions need visibility.** The pipeline view (intake → processing → UAT → deployed → warranty → closed) maps directly to Ginla's task lifecycle (inbox → pending → in_progress → completed).
 
 3. **Photo/document proof matters.** Jenny attaches BRDs and Solution Details to each step. Housekeepers need to attach photos. VAs need to attach call notes. Same pattern.
 
-4. **Automation at the boring steps.** Steps E-K are automatable because they're formulaic. Dochore's auto-triage rules and recurring task templates serve the same purpose — automate the parts that don't need a human decision.
+4. **Automation at the boring steps.** Steps E-K are automatable because they're formulaic. Ginla's auto-triage rules and recurring task templates serve the same purpose — automate the parts that don't need a human decision.
 
 ## Features Mined from Ideas Repo
 
 The Sunday Reset project (fully specced in `~/git/ideas/sunday-reset/`) contributed:
 
-| Feature | Source | Dochore Application |
+| Feature | Source | Ginla Application |
 |---------|--------|-------------------|
 | Operations checklists | sunday-reset/operations | Housekeeper daily/weekly routines |
 | Meal train coordination | sunday-reset/support-network | Family meal planning, delegation |
@@ -126,9 +126,9 @@ Follow travelblog conventions:
 
 | Component | Where | Notes |
 |-----------|-------|-------|
-| MongoDB | hyperion (192.168.4.106:27017) | Existing instance, new `dochore` database |
+| MongoDB | hyperion (192.168.4.106:27017) | Existing instance, new `ginla` database |
 | Docker | hyperion | Docker Compose, no k8s |
-| DNS | /etc/hosts or Tailscale | admin.dochore.test, api.dochore.test |
+| DNS | /etc/hosts or Tailscale | admin.ginla.test, api.ginla.test |
 | Remote access | Tailscale | Access from anywhere on tailnet |
-| Public site | Cloudflare Pages | Static landing page, dochore.com |
+| Public site | Cloudflare Pages | Static landing page, ginla.com |
 | Photos/uploads | NAS or Cloudflare R2 | S3-compatible, same as travelblog |
