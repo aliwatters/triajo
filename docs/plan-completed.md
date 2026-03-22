@@ -9,3 +9,4 @@
 - [x] #1 — Initialize Go API with Gin + MongoDB (18bd551)
 - [x] #5 — Task CRUD API with filters and pagination (7404805)
 - [x] #8 — ginla-mcp server with 6 tools + auto-triage (01fd2cf, dd74d1e)
+- [x] #3 — Docker Compose for local development (1ca8249)
