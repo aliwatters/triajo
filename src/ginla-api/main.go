@@ -40,6 +40,8 @@ func main() {
 		log.Fatalf("failed to init task repository: %v", err)
 	}
 
+	ruleRepo := repository.NewRuleRepository(db.Database, taskRepo.HouseholdID())
+
 	v1 := router.Group("/v1")
 	{
 		healthHandler := handler.NewHealthHandler(db)
@@ -51,6 +53,16 @@ func main() {
 		v1.GET("/tasks/:id", taskHandler.Get)
 		v1.PATCH("/tasks/:id", taskHandler.Update)
 		v1.DELETE("/tasks/:id", taskHandler.Delete)
+
+		emailHandler := handler.NewEmailHandler(taskRepo)
+		v1.POST("/tasks/from-email", emailHandler.FromEmail)
+
+		ruleHandler := handler.NewRuleHandler(ruleRepo)
+		v1.POST("/rules", ruleHandler.Create)
+		v1.GET("/rules", ruleHandler.List)
+		v1.GET("/rules/:id", ruleHandler.Get)
+		v1.PATCH("/rules/:id", ruleHandler.Update)
+		v1.DELETE("/rules/:id", ruleHandler.Delete)
 	}
 
 	srv := &http.Server{
