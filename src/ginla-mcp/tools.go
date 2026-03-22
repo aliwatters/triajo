@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"time"
 
@@ -184,6 +186,30 @@ func toolList() []toolDef {
 				Required: []string{"id"},
 			},
 		},
+		// --- Agent sync tools ---
+		{
+			Name:        "agent_sync",
+			Description: "Sync tasks from swarm-mcp broadcast bus. Reads recent broadcasts on the 'needs' channel and creates ginla tasks from matching messages.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"since_hours": {Type: "number", Description: "How many hours back to scan broadcasts (default 24)"},
+				},
+			},
+		},
+		{
+			Name:        "agent_broadcast",
+			Description: "Broadcast a ginla task completion event to the swarm-mcp bus.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"task_id": {Type: "string", Description: "Task ObjectID (hex string, required)"},
+					"channel": {Type: "string", Description: "Swarm channel to broadcast on (default: fleet)", Enum: []string{"fleet", "api", "needs", "decisions", "deploys", "releases"}},
+					"message": {Type: "string", Description: "Optional message to include in broadcast"},
+				},
+				Required: []string{"task_id"},
+			},
+		},
 	}
 }
 
@@ -212,6 +238,10 @@ func callTool(ctx context.Context, tasks *repository.TaskRepository, rules *repo
 		return handleRuleUpdate(ctx, rules, args)
 	case "rule_delete":
 		return handleRuleDelete(ctx, rules, args)
+	case "agent_sync":
+		return handleAgentSync(ctx, tasks, args)
+	case "agent_broadcast":
+		return handleAgentBroadcast(ctx, tasks, args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -769,4 +799,205 @@ func handleRuleDelete(ctx context.Context, repo *repository.RuleRepository, args
 
 	result := map[string]any{"deleted": true, "id": id}
 	return toJSON(result)
+}
+
+// --- agent sync tool handlers ---
+
+// swarmMessage represents a message from swarm-mcp's JSONL store.
+type swarmMessage struct {
+	ID        string         `json:"id"`
+	Channel   string         `json:"channel"`
+	Message   string         `json:"message"`
+	AgentID   string         `json:"agent_id"`
+	Timestamp string         `json:"timestamp"`
+	Metadata  map[string]any `json:"metadata"`
+}
+
+func handleAgentSync(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	sinceHours := 24.0
+	if h, ok := getFloat(args, "since_hours"); ok && h > 0 {
+		sinceHours = h
+	}
+	since := time.Now().UTC().Add(-time.Duration(sinceHours) * time.Hour)
+
+	swarmPath := os.Getenv("HOME")
+	if swarmPath == "" {
+		swarmPath = "/root"
+	}
+	messagesFile := swarmPath + "/.local/share/swarm-mcp/messages.jsonl"
+
+	f, err := os.Open(messagesFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return toJSON(map[string]any{"created": 0, "messages_file": messagesFile, "note": "swarm messages file not found"})
+		}
+		return "", fmt.Errorf("open swarm messages: %w", err)
+	}
+	defer f.Close()
+
+	var created []map[string]any
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		var msg swarmMessage
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+
+		// Only process 'needs' channel messages
+		if msg.Channel != "needs" {
+			continue
+		}
+
+		// Parse timestamp and filter by since
+		if msg.Timestamp != "" {
+			ts, err := time.Parse(time.RFC3339, msg.Timestamp)
+			if err == nil && ts.Before(since) {
+				continue
+			}
+		}
+
+		// Create task from message
+		now := time.Now().UTC()
+		srcAgent := model.SourceAgent
+		tagAI := model.TagAI
+		title := msg.Message
+		if len(title) > 100 {
+			title = title[:100] + "..."
+		}
+		if title == "" {
+			title = "Agent request from " + msg.AgentID
+		}
+
+		meta := map[string]any{
+			"swarm_message_id": msg.ID,
+			"swarm_agent_id":   msg.AgentID,
+			"swarm_channel":    msg.Channel,
+			"swarm_timestamp":  msg.Timestamp,
+		}
+		if msg.Metadata != nil {
+			for k, v := range msg.Metadata {
+				meta["swarm_"+k] = v
+			}
+		}
+
+		task := &model.Task{
+			Title:       title,
+			Description: msg.Message,
+			Status:      model.StatusInbox,
+			Priority:    model.PriorityNormal,
+			Source:      &srcAgent,
+			Tag:         &tagAI,
+			Meta:        meta,
+			Checklist:   []model.ChecklistItem{},
+			Attachments: []model.Attachment{},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			Activity: []model.ActivityEntry{
+				{Action: "created", By: "agent-sync", At: now, Detail: "imported from swarm-mcp needs channel"},
+			},
+		}
+
+		if err := repo.Create(ctx, task); err != nil {
+			return "", fmt.Errorf("create task from swarm message: %w", err)
+		}
+
+		created = append(created, map[string]any{
+			"task_id":    task.ID.Hex(),
+			"task_title": task.Title,
+			"message_id": msg.ID,
+			"agent_id":   msg.AgentID,
+		})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read swarm messages: %w", err)
+	}
+
+	if created == nil {
+		created = []map[string]any{}
+	}
+
+	return toJSON(map[string]any{
+		"created": len(created),
+		"tasks":   created,
+	})
+}
+
+func handleAgentBroadcast(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	taskID := getString(args, "task_id")
+	oid, err := parseObjectID(taskID)
+	if err != nil {
+		return "", fmt.Errorf("invalid task_id: %w", err)
+	}
+
+	task, err := repo.GetByID(ctx, oid)
+	if err != nil {
+		return "", fmt.Errorf("get task: %w", err)
+	}
+	if task == nil {
+		return "", fmt.Errorf("task not found: %s", taskID)
+	}
+
+	channel := getString(args, "channel")
+	if channel == "" {
+		channel = "fleet"
+	}
+
+	customMsg := getString(args, "message")
+	message := customMsg
+	if message == "" {
+		message = fmt.Sprintf("ginla task %s [%s]: %s", string(task.Status), task.ID.Hex(), task.Title)
+	}
+
+	swarmMsg := map[string]any{
+		"id":        fmt.Sprintf("ginla-%s-%d", task.ID.Hex(), time.Now().UnixNano()),
+		"channel":   channel,
+		"message":   message,
+		"agent_id":  "ginla-mcp",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"metadata": map[string]any{
+			"task_id":     task.ID.Hex(),
+			"task_title":  task.Title,
+			"task_status": string(task.Status),
+			"source":      "ginla",
+		},
+	}
+
+	line, err := json.Marshal(swarmMsg)
+	if err != nil {
+		return "", fmt.Errorf("marshal broadcast: %w", err)
+	}
+
+	swarmPath := os.Getenv("HOME")
+	if swarmPath == "" {
+		swarmPath = "/root"
+	}
+	messagesFile := swarmPath + "/.local/share/swarm-mcp/messages.jsonl"
+
+	// Ensure directory exists
+	dir := swarmPath + "/.local/share/swarm-mcp"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("create swarm dir: %w", err)
+	}
+
+	f, err := os.OpenFile(messagesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return "", fmt.Errorf("open swarm messages file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := fmt.Fprintf(f, "%s\n", line); err != nil {
+		return "", fmt.Errorf("write broadcast: %w", err)
+	}
+
+	return toJSON(map[string]any{
+		"broadcast": true,
+		"channel":   channel,
+		"message":   message,
+		"task_id":   taskID,
+	})
 }
