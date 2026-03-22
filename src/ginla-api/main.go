@@ -14,6 +14,7 @@ import (
 	"github.com/aliwatters/ginla/ginla-api/internal/config"
 	"github.com/aliwatters/ginla/ginla-api/internal/database"
 	"github.com/aliwatters/ginla/ginla-api/internal/handler"
+	"github.com/aliwatters/ginla/ginla-api/internal/repository"
 )
 
 func main() {
@@ -34,10 +35,22 @@ func main() {
 
 	router := gin.Default()
 
+	taskRepo, err := repository.NewTaskRepository(db.Database)
+	if err != nil {
+		log.Fatalf("failed to init task repository: %v", err)
+	}
+
 	v1 := router.Group("/v1")
 	{
 		healthHandler := handler.NewHealthHandler(db)
 		v1.GET("/health", healthHandler.Check)
+
+		taskHandler := handler.NewTaskHandler(taskRepo)
+		v1.POST("/tasks", taskHandler.Create)
+		v1.GET("/tasks", taskHandler.List)
+		v1.GET("/tasks/:id", taskHandler.Get)
+		v1.PATCH("/tasks/:id", taskHandler.Update)
+		v1.DELETE("/tasks/:id", taskHandler.Delete)
 	}
 
 	srv := &http.Server{
