@@ -283,7 +283,7 @@ export function InboxPageClient() {
                           setTaskTriageField(
                             task.id,
                             "tag",
-                            v === "none" ? "" : v
+                            v === "none" || v === null ? "" : v
                           )
                         }
                       >
