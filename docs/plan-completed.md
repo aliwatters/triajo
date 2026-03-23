@@ -21,3 +21,8 @@
 - [x] #21 — Authentication: better-auth + Google OAuth (fb7de8a)
 - [x] #6 — Admin UI: task list with filters (fb7de8a)
 - [x] #7 — Admin UI: task creation + inbox triage (fb7de8a)
+
+### Batch 4: Integrations + CI (completed)
+- [x] #17 — Google Calendar sync (056557e)
+- [x] #18 — Import from Apple Reminders / Todoist / AnyList (056557e)
+- [x] #4 — CI pipeline (056557e)
