@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -15,6 +17,29 @@ import (
 	"github.com/aliwatters/ginla/ginla-mcp/model"
 	"github.com/aliwatters/ginla/ginla-mcp/repository"
 )
+
+// httpClient wraps net/http.Client for making API requests.
+type httpClient struct{}
+
+// newHTTPRequest creates an *http.Request with the given context.
+func newHTTPRequest(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
+	return http.NewRequestWithContext(ctx, method, url, body)
+}
+
+// Do performs the HTTP request and returns the response body as a string, status code, and error.
+func (c *httpClient) Do(req *http.Request) (string, int, error) {
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", resp.StatusCode, err
+	}
+	return string(b), resp.StatusCode, nil
+}
 
 // toolDef describes one MCP tool for the tools/list response.
 type toolDef struct {
@@ -226,6 +251,67 @@ func toolList() []toolDef {
 				Required: []string{"from", "subject"},
 			},
 		},
+		// --- Calendar sync tools ---
+		{
+			Name:        "calendar_sync",
+			Description: "Sync tasks with due dates to Google Calendar via gsuite-mcp. Queries tasks updated since last sync, returns event data to pass to gsuite-mcp calendar tools. Stores calendar_event_id in task.meta for future updates.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"since": {Type: "string", Description: "Only sync tasks updated after this time (RFC3339). Defaults to 24 hours ago."},
+				},
+			},
+		},
+		{
+			Name:        "calendar_import",
+			Description: "Create a ginla task from a Google Calendar event. Sets source=calendar and stores event metadata in task.meta.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"title":       {Type: "string", Description: "Event title (required)"},
+					"description": {Type: "string", Description: "Event description"},
+					"start":       {Type: "string", Description: "Event start time (RFC3339, required)"},
+					"end":         {Type: "string", Description: "Event end time (RFC3339)"},
+					"event_id":    {Type: "string", Description: "Google Calendar event ID"},
+					"calendar_id": {Type: "string", Description: "Google Calendar ID"},
+				},
+				Required: []string{"title", "start"},
+			},
+		},
+		// --- Import tools ---
+		{
+			Name:        "import_todoist",
+			Description: "Import tasks from Todoist. Fetches all active tasks using the Todoist REST API v2 and creates ginla tasks with source=todoist.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"api_token": {Type: "string", Description: "Todoist API token (required)"},
+				},
+				Required: []string{"api_token"},
+			},
+		},
+		{
+			Name:        "import_anylist",
+			Description: "Import items from AnyList. Accepts a JSON array of exported AnyList items and creates ginla tasks with source=anylist.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"items": {Type: "string", Description: "JSON array of AnyList items: [{\"name\":\"...\",\"category\":\"...\",\"checked\":false}] (required)"},
+				},
+				Required: []string{"items"},
+			},
+		},
+		{
+			Name:        "import_apple_reminders",
+			Description: "Import reminders from Apple Reminders. Accepts a JSON array of exported reminder items and creates ginla tasks with source=apple_reminders.",
+			InputSchema: inputSchema{
+				Type: "object",
+				Properties: map[string]property{
+					"reminders": {Type: "string", Description: "JSON array of reminders: [{\"title\":\"...\",\"notes\":\"...\",\"dueDate\":\"...\",\"completed\":false,\"list\":\"...\"}] (required)"},
+				},
+				Required: []string{"reminders"},
+			},
+		},
 	}
 }
 
@@ -260,6 +346,16 @@ func callTool(ctx context.Context, tasks *repository.TaskRepository, rules *repo
 		return handleAgentBroadcast(ctx, tasks, args)
 	case "email_to_task":
 		return handleEmailToTask(ctx, tasks, args)
+	case "calendar_sync":
+		return handleCalendarSync(ctx, tasks, args)
+	case "calendar_import":
+		return handleCalendarImport(ctx, tasks, args)
+	case "import_todoist":
+		return handleImportTodoist(ctx, tasks, args)
+	case "import_anylist":
+		return handleImportAnyList(ctx, tasks, args)
+	case "import_apple_reminders":
+		return handleImportAppleReminders(ctx, tasks, args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1126,4 +1222,376 @@ func handleEmailToTask(ctx context.Context, repo *repository.TaskRepository, arg
 	}
 
 	return toJSON(task)
+}
+
+// --- calendar tool handlers ---
+
+// handleCalendarSync returns tasks with due dates updated since the given time,
+// formatted as calendar event data ready to pass to gsuite-mcp calendar tools.
+// The actual gsuite-mcp API calls are made by the MCP client (e.g., Claude).
+func handleCalendarSync(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	if s := getString(args, "since"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return "", fmt.Errorf("invalid since: %w", err)
+		}
+		since = t
+	}
+
+	tasks, err := repo.ListTasksWithDueSince(ctx, since)
+	if err != nil {
+		return "", fmt.Errorf("list tasks for sync: %w", err)
+	}
+
+	type calendarEvent struct {
+		TaskID          string `json:"task_id"`
+		Title           string `json:"title"`
+		Description     string `json:"description"`
+		DueDate         string `json:"due_date"`
+		CalendarEventID string `json:"calendar_event_id,omitempty"`
+		Action          string `json:"action"` // "create" or "update"
+	}
+
+	events := make([]calendarEvent, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Due == nil {
+			continue
+		}
+		ev := calendarEvent{
+			TaskID:      t.ID.Hex(),
+			Title:       t.Title,
+			Description: t.Description,
+			DueDate:     t.Due.Format(time.RFC3339),
+			Action:      "create",
+		}
+		if t.Meta != nil {
+			if eid, ok := t.Meta["calendar_event_id"].(string); ok && eid != "" {
+				ev.CalendarEventID = eid
+				ev.Action = "update"
+			}
+		}
+		events = append(events, ev)
+	}
+
+	result := map[string]any{
+		"events":      events,
+		"count":       len(events),
+		"synced_since": since.Format(time.RFC3339),
+		"note": "Pass each event to gsuite-mcp calendar_create_event or calendar_update_event. " +
+			"After creating, call task_update with meta={\"calendar_event_id\": \"<event_id>\"} to store the ID.",
+	}
+	return toJSON(result)
+}
+
+// handleCalendarImport creates a ginla task from a Google Calendar event.
+func handleCalendarImport(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	title := getString(args, "title")
+	if title == "" {
+		return "", fmt.Errorf("title is required")
+	}
+	startStr := getString(args, "start")
+	if startStr == "" {
+		return "", fmt.Errorf("start is required")
+	}
+
+	startTime, err := time.Parse(time.RFC3339, startStr)
+	if err != nil {
+		return "", fmt.Errorf("invalid start time: %w", err)
+	}
+
+	now := time.Now().UTC()
+	src := model.SourceCalendar
+
+	meta := map[string]any{
+		"calendar_event_start": startStr,
+	}
+	if end := getString(args, "end"); end != "" {
+		meta["calendar_event_end"] = end
+	}
+	if eventID := getString(args, "event_id"); eventID != "" {
+		meta["calendar_event_id"] = eventID
+	}
+	if calID := getString(args, "calendar_id"); calID != "" {
+		meta["calendar_id"] = calID
+	}
+
+	task := &model.Task{
+		Title:       title,
+		Description: getString(args, "description"),
+		Status:      model.StatusInbox,
+		Priority:    model.PriorityNormal,
+		Source:      &src,
+		Due:         &startTime,
+		Meta:        meta,
+		Checklist:   []model.ChecklistItem{},
+		Attachments: []model.Attachment{},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Activity: []model.ActivityEntry{
+			{Action: "created", By: "calendar-import", At: now, Detail: "imported from Google Calendar"},
+		},
+	}
+
+	if err := repo.Create(ctx, task); err != nil {
+		return "", fmt.Errorf("create task from calendar: %w", err)
+	}
+
+	return toJSON(task)
+}
+
+// --- import tool handlers ---
+
+// todoistTask represents a task returned by the Todoist REST API v2.
+type todoistTask struct {
+	ID          string   `json:"id"`
+	Content     string   `json:"content"`
+	Description string   `json:"description"`
+	Priority    int      `json:"priority"` // 1=normal, 2=high, 3=very high, 4=urgent
+	Labels      []string `json:"labels"`
+	Due         *struct {
+		Date     string `json:"date"`
+		Datetime string `json:"datetime"`
+	} `json:"due"`
+}
+
+// mapTodoistPriority converts Todoist priority (1-4) to ginla priority.
+// Todoist: 1=normal, 2=high, 3=very high, 4=urgent (reversed from UI labels).
+func mapTodoistPriority(p int) model.Priority {
+	switch p {
+	case 4:
+		return model.PriorityUrgent
+	case 3:
+		return model.PriorityHigh
+	case 2:
+		return model.PriorityNormal
+	default:
+		return model.PriorityLow
+	}
+}
+
+func handleImportTodoist(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	apiToken := getString(args, "api_token")
+	if apiToken == "" {
+		return "", fmt.Errorf("api_token is required")
+	}
+
+	// Fetch tasks from Todoist API
+	req, err := newHTTPRequest(ctx, "GET", "https://api.todoist.com/rest/v2/tasks", nil)
+	if err != nil {
+		return "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	client := &httpClient{}
+	body, statusCode, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch todoist tasks: %w", err)
+	}
+	if statusCode != 200 {
+		return "", fmt.Errorf("todoist API returned status %d: %s", statusCode, body)
+	}
+
+	var todoistTasks []todoistTask
+	if err := json.Unmarshal([]byte(body), &todoistTasks); err != nil {
+		return "", fmt.Errorf("parse todoist response: %w", err)
+	}
+
+	now := time.Now().UTC()
+	src := model.Source("todoist")
+	imported := 0
+
+	for _, tt := range todoistTasks {
+		task := &model.Task{
+			Title:       tt.Content,
+			Description: tt.Description,
+			Status:      model.StatusInbox,
+			Priority:    mapTodoistPriority(tt.Priority),
+			Source:      &src,
+			Meta: map[string]any{
+				"todoist_id": tt.ID,
+			},
+			Checklist:   []model.ChecklistItem{},
+			Attachments: []model.Attachment{},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			Activity: []model.ActivityEntry{
+				{Action: "created", By: "import-todoist", At: now, Detail: fmt.Sprintf("todoist_id: %s", tt.ID)},
+			},
+		}
+
+		// Map first label to ginla tag if it matches
+		if len(tt.Labels) > 0 {
+			labelUpper := strings.ToUpper(tt.Labels[0])
+			t := model.Tag(labelUpper)
+			if model.ValidTags[t] {
+				task.Tag = &t
+			}
+		}
+
+		// Map due date
+		if tt.Due != nil {
+			dueStr := tt.Due.Datetime
+			if dueStr == "" {
+				dueStr = tt.Due.Date + "T00:00:00Z"
+			}
+			if t, err := time.Parse(time.RFC3339, dueStr); err == nil {
+				task.Due = &t
+			}
+		}
+
+		if err := repo.Create(ctx, task); err != nil {
+			return "", fmt.Errorf("create task from todoist: %w", err)
+		}
+		imported++
+	}
+
+	return toJSON(map[string]any{
+		"imported": imported,
+		"source":   "todoist",
+	})
+}
+
+// anylistItem represents a single item exported from AnyList.
+type anylistItem struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Checked  bool   `json:"checked"`
+}
+
+func handleImportAnyList(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	itemsStr := getString(args, "items")
+	if itemsStr == "" {
+		return "", fmt.Errorf("items is required")
+	}
+
+	var items []anylistItem
+	if err := json.Unmarshal([]byte(itemsStr), &items); err != nil {
+		return "", fmt.Errorf("invalid items JSON: %w", err)
+	}
+
+	now := time.Now().UTC()
+	src := model.Source("anylist")
+	imported := 0
+
+	for _, item := range items {
+		if item.Checked {
+			continue // skip already-completed items
+		}
+		if item.Name == "" {
+			continue
+		}
+
+		meta := map[string]any{
+			"anylist_category": item.Category,
+		}
+
+		// Derive tag from category: shopping-related items go to VA
+		tag := model.TagVA
+		task := &model.Task{
+			Title:       item.Name,
+			Status:      model.StatusInbox,
+			Priority:    model.PriorityNormal,
+			Source:      &src,
+			Tag:         &tag,
+			Meta:        meta,
+			Checklist:   []model.ChecklistItem{},
+			Attachments: []model.Attachment{},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			Activity: []model.ActivityEntry{
+				{Action: "created", By: "import-anylist", At: now, Detail: fmt.Sprintf("category: %s", item.Category)},
+			},
+		}
+
+		if err := repo.Create(ctx, task); err != nil {
+			return "", fmt.Errorf("create task from anylist: %w", err)
+		}
+		imported++
+	}
+
+	return toJSON(map[string]any{
+		"imported": imported,
+		"source":   "anylist",
+	})
+}
+
+// appleReminder represents a single reminder exported from Apple Reminders.
+type appleReminder struct {
+	Title     string `json:"title"`
+	Notes     string `json:"notes"`
+	DueDate   string `json:"dueDate"`
+	Completed bool   `json:"completed"`
+	List      string `json:"list"`
+}
+
+func handleImportAppleReminders(ctx context.Context, repo *repository.TaskRepository, args map[string]any) (string, error) {
+	remindersStr := getString(args, "reminders")
+	if remindersStr == "" {
+		return "", fmt.Errorf("reminders is required")
+	}
+
+	var reminders []appleReminder
+	if err := json.Unmarshal([]byte(remindersStr), &reminders); err != nil {
+		return "", fmt.Errorf("invalid reminders JSON: %w", err)
+	}
+
+	now := time.Now().UTC()
+	src := model.Source("apple_reminders")
+	imported := 0
+
+	for _, r := range reminders {
+		if r.Completed {
+			continue // skip completed reminders
+		}
+		if r.Title == "" {
+			continue
+		}
+
+		meta := map[string]any{
+			"reminder_list": r.List,
+		}
+
+		// Map list name to ginla tag
+		var tag *model.Tag
+		listUpper := strings.ToUpper(r.List)
+		t := model.Tag(listUpper)
+		if model.ValidTags[t] {
+			tag = &t
+		}
+
+		task := &model.Task{
+			Title:       r.Title,
+			Description: r.Notes,
+			Status:      model.StatusInbox,
+			Priority:    model.PriorityNormal,
+			Source:      &src,
+			Tag:         tag,
+			Meta:        meta,
+			Checklist:   []model.ChecklistItem{},
+			Attachments: []model.Attachment{},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			Activity: []model.ActivityEntry{
+				{Action: "created", By: "import-apple-reminders", At: now, Detail: fmt.Sprintf("list: %s", r.List)},
+			},
+		}
+
+		if r.DueDate != "" {
+			t, err := time.Parse(time.RFC3339, r.DueDate)
+			if err == nil {
+				task.Due = &t
+			}
+		}
+
+		if err := repo.Create(ctx, task); err != nil {
+			return "", fmt.Errorf("create task from apple reminders: %w", err)
+		}
+		imported++
+	}
+
+	return toJSON(map[string]any{
+		"imported": imported,
+		"source":   "apple_reminders",
+	})
 }
