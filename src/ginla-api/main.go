@@ -57,6 +57,11 @@ func main() {
 		emailHandler := handler.NewEmailHandler(taskRepo)
 		v1.POST("/tasks/from-email", emailHandler.FromEmail)
 
+		syncHandler := handler.NewSyncHandler(taskRepo)
+		v1.POST("/sync/calendar", syncHandler.CalendarSync)
+		v1.POST("/tasks/from-calendar", syncHandler.FromCalendar)
+		v1.POST("/import/:source", syncHandler.Import)
+
 		ruleHandler := handler.NewRuleHandler(ruleRepo)
 		v1.POST("/rules", ruleHandler.Create)
 		v1.GET("/rules", ruleHandler.List)

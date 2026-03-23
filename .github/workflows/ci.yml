@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go-api:
+    runs-on: [self-hosted, Linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Vet
+        run: cd src/ginla-api && go vet ./...
+      - name: Build
+        run: cd src/ginla-api && go build ./...
+
+  go-mcp:
+    runs-on: [self-hosted, Linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Vet
+        run: cd src/ginla-mcp && go vet ./...
+      - name: Build
+        run: cd src/ginla-mcp && go build ./...
+
+  nextjs:
+    runs-on: [self-hosted, Linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/ginla-app/package-lock.json
+      - name: Install
+        run: cd src/ginla-app && npm ci
+      - name: Lint
+        run: cd src/ginla-app && npm run lint
+      - name: Build
+        run: cd src/ginla-app && npm run build
+
+  docker:
+    runs-on: [self-hosted, Linux]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t ginla-api:ci -f src/ginla-api/Dockerfile src/ginla-api
+      - name: Build App image
+        run: docker build -t ginla-app:ci -f src/ginla-app/Dockerfile src/ginla-app

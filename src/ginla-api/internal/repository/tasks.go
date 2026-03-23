@@ -193,6 +193,32 @@ func (r *TaskRepository) UpdateFields(ctx context.Context, id bson.ObjectID, set
 	return &updated, nil
 }
 
+// ListTasksWithDueSince returns tasks that have a due date and were updated
+// after the given time. Used for calendar sync.
+func (r *TaskRepository) ListTasksWithDueSince(ctx context.Context, since time.Time) ([]model.Task, error) {
+	filter := bson.D{
+		{Key: "household_id", Value: r.householdID},
+		{Key: "due", Value: bson.D{{Key: "$exists", Value: true}, {Key: "$ne", Value: nil}}},
+		{Key: "updated_at", Value: bson.D{{Key: "$gte", Value: since}}},
+	}
+
+	opts := options.Find().SetSort(bson.D{{Key: "due", Value: 1}})
+	cursor, err := r.col.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("find tasks with due: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var tasks []model.Task
+	if err := cursor.All(ctx, &tasks); err != nil {
+		return nil, fmt.Errorf("decode tasks: %w", err)
+	}
+	if tasks == nil {
+		tasks = []model.Task{}
+	}
+	return tasks, nil
+}
+
 // Delete removes a task from the collection.
 func (r *TaskRepository) Delete(ctx context.Context, id bson.ObjectID) (bool, error) {
 	filter := bson.D{
