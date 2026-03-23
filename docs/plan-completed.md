@@ -15,3 +15,9 @@
 - [x] #9 — Auto-triage rules engine (3b6fc84)
 - [x] #10 — agents-mcp integration (3b6fc84)
 - [x] #20 — Email-to-task (3b6fc84)
+
+### Batch 3: UI Foundation (completed)
+- [x] #2 — Initialize Next.js admin app (fb7de8a)
+- [x] #21 — Authentication: better-auth + Google OAuth (fb7de8a)
+- [x] #6 — Admin UI: task list with filters (fb7de8a)
+- [x] #7 — Admin UI: task creation + inbox triage (fb7de8a)
